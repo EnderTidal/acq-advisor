@@ -1,0 +1,7 @@
+name = "acq-advisor"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "public"
+
+[vars]
+QDRANT_HOST = "2.25.169.56"
+QDRANT_PORT = "32771"

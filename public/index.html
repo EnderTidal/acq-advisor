@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ACQ Advisor — RAG Business Advisor by Josh Tibbetts</title>
+  <meta name="description" content="A production RAG advisor built on Hormozi's published frameworks. Ask it about offers, pricing, lead generation, and scaling.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <!-- Hero -->
+    <header class="hero">
+      <div class="hero-badge">PRODUCTION RAG DEMO</div>
+      <h1>ACQ Advisor</h1>
+      <p class="hero-sub">A business advisor grounded in Alex Hormozi's published frameworks.<br>
+      Real vector search. Real retrieval scores. Real cost tracking.</p>
+      <div class="hero-stack">
+        <span class="chip">Cloudflare Workers</span>
+        <span class="chip">Qdrant Vector DB</span>
+        <span class="chip">Claude Sonnet</span>
+        <span class="chip">Gemini Embeddings</span>
+      </div>
+      <p class="hero-cta">Ask it anything about offers, pricing, leads, or scaling ↓</p>
+    </header>
+
+    <!-- Chat -->
+    <main class="chat-container">
+      <div class="chat-messages" id="chatMessages">
+        <div class="msg bot">
+          <div class="msg-content">
+            <p>Hey — I'm an AI advisor trained on <strong>$100M Offers</strong> and <strong>$100M Leads</strong> by Alex Hormozi. Ask me about crafting irresistible offers, lead generation, pricing strategy, or scaling your business.</p>
+            <div class="suggestions">
+              <button class="suggestion" onclick="askSuggestion(this)">How do I create a Grand Slam Offer?</button>
+              <button class="suggestion" onclick="askSuggestion(this)">What makes a good lead magnet?</button>
+              <button class="suggestion" onclick="askSuggestion(this)">How should I price my service?</button>
+              <button class="suggestion" onclick="askSuggestion(this)">What's the value equation?</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <form class="chat-input" id="chatForm" onsubmit="sendMessage(event)">
+        <input type="text" id="userInput" placeholder="Ask about offers, pricing, leads, or scaling..." autocomplete="off" autofocus>
+        <button type="submit" id="sendBtn">↑</button>
+      </form>
+    </main>
+
+    <!-- Metrics Panel -->
+    <aside class="metrics-panel" id="metricsPanel">
+      <h3>Pipeline Metrics</h3>
+      <div class="metric-grid" id="metricGrid">
+        <div class="metric">
+          <span class="metric-label">Status</span>
+          <span class="metric-value" id="metricStatus">Idle</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Total Latency</span>
+          <span class="metric-value" id="metricLatency">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Embedding</span>
+          <span class="metric-value" id="metricEmbed">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Retrieval</span>
+          <span class="metric-value" id="metricRetrieval">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Chunks Used</span>
+          <span class="metric-value" id="metricChunks">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Similarity Scores</span>
+          <span class="metric-value" id="metricScores">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Generation</span>
+          <span class="metric-value" id="metricGen">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Tokens (in/out)</span>
+          <span class="metric-value" id="metricTokens">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Model</span>
+          <span class="metric-value" id="metricModel">claude-sonnet-4</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Est. Cost</span>
+          <span class="metric-value" id="metricCost">—</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-build">
+        Built in <strong id="buildHours">—</strong> hours of human time.
+        <a href="https://github.com/EnderTidal/acq-advisor" target="_blank">View source</a>
+      </div>
+      <div class="footer-author">
+        Built by <strong>Josh Tibbetts</strong> — Navy veteran, AI engineer, builder.
+        <br>
+        <span class="footer-sub">Cloudflare Workers · Qdrant · Claude · Gemini Embeddings · TypeScript · Python</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
