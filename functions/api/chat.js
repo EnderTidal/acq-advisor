@@ -281,7 +281,7 @@ export async function onRequestPost({ request, env }) {
     // Don't await — let it stream
     processStream();
 
-    return new Response(readable, { status: 200, headers });
+    return new Response(readable, { status: 200, headers: sseHeaders });
 
   } catch (err) {
     return new Response(JSON.stringify({
