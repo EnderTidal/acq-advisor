@@ -74,18 +74,22 @@ function updateMetrics(data) {
     document.getElementById('metricStatus').textContent = 'Complete';
     document.getElementById('metricStatus').style.color = 'var(--green)';
   }
-  // Update budget from session cost data (simple math: $5 cap - total spent)
-  if (data.generation) {
-    const cap = 5.00;
-    const spent = totalCost;
-    const remaining = Math.max(0, cap - spent);
-    document.getElementById('budgetSpent').textContent = `$${spent.toFixed(4)}`;
-    document.getElementById('budgetCap').textContent = `$${cap.toFixed(2)}`;
-    document.getElementById('budgetRemaining').textContent = `$${remaining.toFixed(4)}`;
+  // Update budget from server-provided D1 data (persistent across sessions)
+  if (data.budget) {
+    const spent = parseFloat(data.budget.dailySpend.replace('$', '')) || 0;
+    const cap = parseFloat(data.budget.dailyCap.replace('$', '')) || 5.00;
+    const remaining = parseFloat(data.budget.remaining.replace('$', '')) || 0;
+    document.getElementById('budgetSpent').textContent = data.budget.dailySpend;
+    document.getElementById('budgetCap').textContent = data.budget.dailyCap;
+    document.getElementById('budgetRemaining').textContent = data.budget.remaining;
     const pct = Math.min(100, (spent / cap) * 100);
     const bar = document.getElementById('budgetBarFill');
     bar.style.width = `${pct}%`;
     bar.className = 'budget-bar-fill' + (pct > 80 ? ' critical' : pct > 50 ? ' warning' : '');
+    // Update query count from server
+    if (data.budget.queryCount !== undefined) {
+      document.getElementById('dashQueries').textContent = data.budget.queryCount;
+    }
   }
 }
 

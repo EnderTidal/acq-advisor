@@ -7,3 +7,8 @@ pages_build_output_dir = "public"
 [[pages.kv_namespaces]]
 binding = "KNOWLEDGE_KV"
 id = "c81f2f9eb1474262911aff4c3bdac367"
+
+[[pages.d1_databases]]
+binding = "BUDGET_DB"
+database_name = "acq-advisor-db"
+database_id = "340c1ef7-7737-4807-855a-8451b11d5736"

@@ -123,11 +123,10 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ error: 'Missing API keys' }), { status: 500, headers: jsonHeaders });
     }
 
-    // Rate limiting (IP-based, hourly)
+    // Rate limiting (IP-based, hourly) — uses KV
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
     const hour = new Date().toISOString().slice(0, 13);
     const rateKey = `rate:${ip}:${hour}`;
-    const dayKey = `cost:${new Date().toISOString().slice(0, 10)}`;
 
     if (env.KNOWLEDGE_KV) {
       const count = parseInt(await env.KNOWLEDGE_KV.get(rateKey) || '0');
@@ -135,9 +134,13 @@ export async function onRequestPost({ request, env }) {
         return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again in an hour.' }), { status: 429, headers: jsonHeaders });
       }
       await env.KNOWLEDGE_KV.put(rateKey, String(count + 1), { expirationTtl: 3600 });
+    }
 
-      // Daily spending cap
-      const dailyCost = parseFloat(await env.KNOWLEDGE_KV.get(dayKey) || '0');
+    // Daily spending cap — uses D1 (persistent across sessions)
+    const today = new Date().toISOString().slice(0, 10);
+    if (env.BUDGET_DB) {
+      const row = await env.BUDGET_DB.prepare('SELECT total_cost FROM budget_tracking WHERE date = ?').bind(today).first();
+      const dailyCost = row?.total_cost || 0;
       if (dailyCost >= DAILY_COST_CAP_USD) {
         return new Response(JSON.stringify({ error: 'The advisor is resting for today. Daily query limit reached. Try again tomorrow.' }), { status: 429, headers: jsonHeaders });
       }
@@ -246,12 +249,18 @@ export async function onRequestPost({ request, env }) {
         const outputCost = (outputTokens / 1000000) * 15;
         const totalCost = Math.round((inputCost + outputCost) * 10000) / 10000;
 
-        // Track daily spend in KV
+        // Track daily spend in D1 (persistent)
         let dailySpend = 0;
-        if (env.KNOWLEDGE_KV) {
-          const prevCost = parseFloat(await env.KNOWLEDGE_KV.get(dayKey) || '0');
-          dailySpend = Math.round((prevCost + totalCost) * 10000) / 10000;
-          await env.KNOWLEDGE_KV.put(dayKey, String(dailySpend), { expirationTtl: 86400 });
+        let queryCount = 0;
+        if (env.BUDGET_DB) {
+          await env.BUDGET_DB.prepare(
+            'INSERT INTO budget_tracking (date, total_cost, query_count) VALUES (?, ?, 1) ON CONFLICT(date) DO UPDATE SET total_cost = total_cost + ?, query_count = query_count + 1'
+          ).bind(today, totalCost, totalCost).run();
+
+          const row = await env.BUDGET_DB.prepare('SELECT total_cost, query_count FROM budget_tracking WHERE date = ?').bind(today).first();
+          dailySpend = row?.total_cost || totalCost;
+          queryCount = row?.query_count || 1;
+          dailySpend = Math.round(dailySpend * 10000) / 10000;
         }
 
         const finalMetrics = {
@@ -267,7 +276,8 @@ export async function onRequestPost({ request, env }) {
           budget: {
             dailySpend: `$${dailySpend}`,
             dailyCap: `$${DAILY_COST_CAP_USD.toFixed(2)}`,
-            remaining: `$${Math.max(0, DAILY_COST_CAP_USD - dailySpend).toFixed(4)}`
+            remaining: `$${Math.max(0, DAILY_COST_CAP_USD - dailySpend).toFixed(4)}`,
+            queryCount
           }
         };
         await writer.write(encoder.encode(`data: ${JSON.stringify(finalMetrics)}\n\n`));
