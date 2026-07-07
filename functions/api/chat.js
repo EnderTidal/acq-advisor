@@ -93,7 +93,7 @@ async function generateResponse(messages, context, anthropicKey) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: systemPrompt,
       messages: messages.slice(-10)
@@ -172,7 +172,7 @@ export async function onRequestPost({ request, env }) {
           latencyMs: generation.latencyMs,
           inputTokens: generation.inputTokens,
           outputTokens: generation.outputTokens,
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-6',
           estimatedCost: `$${totalCost}`
         }
       }
