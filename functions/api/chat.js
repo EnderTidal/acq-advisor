@@ -131,6 +131,24 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ error: 'empty query' }), { status: 400, headers });
     }
 
+    // Env diagnostics
+    const envCheck = {
+      hasGemini: !!env.GEMINI_API_KEY,
+      hasAnthropic: !!env.ANTHROPIC_API_KEY,
+      hasKV: !!env.KNOWLEDGE_KV,
+      envKeys: Object.keys(env)
+    };
+
+    if (!env.GEMINI_API_KEY) {
+      return new Response(JSON.stringify({ error: 'Missing GEMINI_API_KEY', envCheck }), { status: 500, headers });
+    }
+    if (!env.KNOWLEDGE_KV) {
+      return new Response(JSON.stringify({ error: 'Missing KNOWLEDGE_KV binding', envCheck }), { status: 500, headers });
+    }
+    if (!env.ANTHROPIC_API_KEY) {
+      return new Response(JSON.stringify({ error: 'Missing ANTHROPIC_API_KEY', envCheck }), { status: 500, headers });
+    }
+
     const pipelineStart = Date.now();
 
     // Step 1: Embed the query
