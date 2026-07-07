@@ -48,15 +48,15 @@ function cosineSimilarity(a, b) {
 async function vectorSearch(queryVector, env, limit = 5) {
   const start = Date.now();
 
-  // Load vector index from KV (cached at edge after first read)
-  const indexRaw = await env.KNOWLEDGE_KV.get('vector_index');
-  if (!indexRaw) throw new Error('Vector index not found in KV');
-  const index = JSON.parse(indexRaw);
+  // Load vector index from static assets (cached at edge by CF)
+  const indexRes = await env.ASSETS.fetch(new Request('https://dummy/data/vector-index.json'));
+  if (!indexRes.ok) throw new Error('Vector index not found');
+  const index = await indexRes.json();
 
   // Load chunk texts
-  const textsRaw = await env.KNOWLEDGE_KV.get('chunk_texts');
-  if (!textsRaw) throw new Error('Chunk texts not found in KV');
-  const texts = JSON.parse(textsRaw);
+  const textsRes = await env.ASSETS.fetch(new Request('https://dummy/data/chunk-texts.json'));
+  if (!textsRes.ok) throw new Error('Chunk texts not found');
+  const texts = await textsRes.json();
 
   // Compute cosine similarity for each chunk
   const scored = index.map(entry => ({
@@ -131,22 +131,8 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ error: 'empty query' }), { status: 400, headers });
     }
 
-    // Env diagnostics
-    const envCheck = {
-      hasGemini: !!env.GEMINI_API_KEY,
-      hasAnthropic: !!env.ANTHROPIC_API_KEY,
-      hasKV: !!env.KNOWLEDGE_KV,
-      envKeys: Object.keys(env)
-    };
-
-    if (!env.GEMINI_API_KEY) {
-      return new Response(JSON.stringify({ error: 'Missing GEMINI_API_KEY', envCheck }), { status: 500, headers });
-    }
-    if (!env.KNOWLEDGE_KV) {
-      return new Response(JSON.stringify({ error: 'Missing KNOWLEDGE_KV binding', envCheck }), { status: 500, headers });
-    }
-    if (!env.ANTHROPIC_API_KEY) {
-      return new Response(JSON.stringify({ error: 'Missing ANTHROPIC_API_KEY', envCheck }), { status: 500, headers });
+    if (!env.GEMINI_API_KEY || !env.ANTHROPIC_API_KEY) {
+      return new Response(JSON.stringify({ error: 'Missing API keys' }), { status: 500, headers });
     }
 
     const pipelineStart = Date.now();
