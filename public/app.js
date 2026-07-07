@@ -13,7 +13,12 @@ let conversationHistory = [];
 function addMessage(role, content) {
   const div = document.createElement('div');
   div.className = `msg ${role}`;
-  div.innerHTML = `<div class="msg-content"><p>${escapeHtml(content)}</p></div>`;
+  // Simple markdown: **bold**, *italic*, \n→<br>
+  let html = escapeHtml(content)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+  div.innerHTML = `<div class="msg-content"><p>${html}</p></div>`;
   chatMessages.appendChild(div);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
