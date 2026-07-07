@@ -74,6 +74,17 @@ function updateMetrics(data) {
     document.getElementById('metricStatus').textContent = 'Complete';
     document.getElementById('metricStatus').style.color = 'var(--green)';
   }
+  if (data.budget) {
+    document.getElementById('budgetSpent').textContent = data.budget.dailySpend;
+    document.getElementById('budgetCap').textContent = data.budget.dailyCap;
+    document.getElementById('budgetRemaining').textContent = data.budget.remaining;
+    const spent = parseFloat(data.budget.dailySpend.replace('$', ''));
+    const cap = parseFloat(data.budget.dailyCap.replace('$', ''));
+    const pct = Math.min(100, (spent / cap) * 100);
+    const bar = document.getElementById('budgetBarFill');
+    bar.style.width = `${pct}%`;
+    bar.className = 'budget-bar-fill' + (pct > 80 ? ' critical' : pct > 50 ? ' warning' : '');
+  }
 }
 
 function showSources(sourcesWrap, sources) {
