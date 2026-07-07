@@ -2,6 +2,8 @@ name = "acq-advisor"
 compatibility_date = "2024-09-23"
 pages_build_output_dir = "public"
 
-[vars]
-QDRANT_HOST = "2.25.169.56"
-QDRANT_PORT = "32771"
+[pages]
+
+[[pages.kv_namespaces]]
+binding = "KNOWLEDGE_KV"
+id = "c81f2f9eb1474262911aff4c3bdac367"

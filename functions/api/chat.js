@@ -1,7 +1,7 @@
 /**
  * POST /api/chat
  * RAG-powered business advisor using Hormozi's published frameworks.
- * Pipeline: embed query → vector search (Qdrant) → synthesize (Claude) → respond with metrics
+ * Pipeline: embed query (Gemini) → cosine similarity search (KV vectors) → synthesize (Claude) → respond with metrics
  */
 
 const SYSTEM_PROMPT = `You are a business advisor grounded in Alex Hormozi's published frameworks from "$100M Offers" and "$100M Leads."
@@ -35,28 +35,49 @@ async function embedQuery(text, geminiKey) {
   return { vector: data.embedding.values, latencyMs: Date.now() - start };
 }
 
-async function searchQdrant(vector, env, limit = 5) {
+function cosineSimilarity(a, b) {
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+async function vectorSearch(queryVector, env, limit = 5) {
   const start = Date.now();
-  const body = JSON.stringify({ vector, limit, with_payload: true });
-  const res = await fetch(
-    `http://${env.QDRANT_HOST}:${env.QDRANT_PORT}/collections/knowledge_base/points/search`,
-    {
-      method: 'POST',
-      headers: {
-        'api-key': env.QDRANT_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body
-    }
-  );
-  const data = await res.json();
+
+  // Load vector index from KV (cached at edge after first read)
+  const indexRaw = await env.KNOWLEDGE_KV.get('vector_index');
+  if (!indexRaw) throw new Error('Vector index not found in KV');
+  const index = JSON.parse(indexRaw);
+
+  // Load chunk texts
+  const textsRaw = await env.KNOWLEDGE_KV.get('chunk_texts');
+  if (!textsRaw) throw new Error('Chunk texts not found in KV');
+  const texts = JSON.parse(textsRaw);
+
+  // Compute cosine similarity for each chunk
+  const scored = index.map(entry => ({
+    id: entry.id,
+    score: cosineSimilarity(queryVector, entry.vector)
+  }));
+
+  // Sort by score descending, take top N
+  scored.sort((a, b) => b.score - a.score);
+  const topN = scored.slice(0, limit);
+
+  const results = topN.map(s => ({
+    text: texts[s.id]?.text || '',
+    source: texts[s.id]?.source || 'unknown',
+    score: Math.round(s.score * 1000) / 1000
+  }));
+
   return {
-    results: (data.result || []).map(r => ({
-      text: r.payload?.text || '',
-      source: r.payload?.source || 'unknown',
-      score: Math.round(r.score * 1000) / 1000
-    })),
-    latencyMs: Date.now() - start
+    results,
+    latencyMs: Date.now() - start,
+    totalChunks: index.length
   };
 }
 
@@ -92,11 +113,9 @@ async function generateResponse(messages, context, anthropicKey) {
 }
 
 export async function onRequestPost({ request, env }) {
-  // CORS
-  const origin = request.headers.get('Origin') || '';
   const headers = {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
   };
@@ -112,42 +131,26 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ error: 'empty query' }), { status: 400, headers });
     }
 
-    // Rate limiting
-    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-    const hour = new Date().toISOString().slice(0, 13);
-    const rateKey = `rate:${ip}:${hour}`;
-
-    if (env.RATE_KV) {
-      const count = parseInt(await env.RATE_KV.get(rateKey) || '0');
-      if (count >= 30) {
-        return new Response(JSON.stringify({
-          error: 'Rate limit exceeded. Try again in an hour.',
-          metrics: { rateLimited: true }
-        }), { status: 429, headers });
-      }
-      await env.RATE_KV.put(rateKey, String(count + 1), { expirationTtl: 3600 });
-    }
-
     const pipelineStart = Date.now();
 
     // Step 1: Embed the query
     const embedding = await embedQuery(userQuery, env.GEMINI_API_KEY);
 
-    // Step 2: Vector search
-    const search = await searchQdrant(embedding.vector, env);
+    // Step 2: Vector search (cosine similarity over KV-stored embeddings)
+    const search = await vectorSearch(embedding.vector, env);
 
-    // Filter to Hormozi-relevant content (score > 0.65)
+    // Filter to relevant content (score > 0.65)
     const relevant = search.results.filter(r => r.score > 0.65);
     const context = relevant.map((r, i) =>
-      `[Chunk ${i + 1} | score: ${r.score}]\n${r.text}`
+      `[Chunk ${i + 1} | similarity: ${r.score}]\n${r.text}`
     ).join('\n\n---\n\n');
 
     // Step 3: Generate response
     const generation = await generateResponse(messages, context || 'No relevant context found.', env.ANTHROPIC_API_KEY);
 
-    // Cost estimation (approximate)
-    const inputCost = (generation.inputTokens / 1000) * 0.003;
-    const outputCost = (generation.outputTokens / 1000) * 0.015;
+    // Cost estimation (Sonnet pricing)
+    const inputCost = (generation.inputTokens / 1000000) * 3;
+    const outputCost = (generation.outputTokens / 1000000) * 15;
     const totalCost = Math.round((inputCost + outputCost) * 10000) / 10000;
 
     return new Response(JSON.stringify({
@@ -157,7 +160,7 @@ export async function onRequestPost({ request, env }) {
         embedding: { latencyMs: embedding.latencyMs },
         retrieval: {
           latencyMs: search.latencyMs,
-          chunksSearched: search.results.length,
+          chunksSearched: search.totalChunks,
           chunksUsed: relevant.length,
           scores: relevant.map(r => r.score)
         },
