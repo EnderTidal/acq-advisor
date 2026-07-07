@@ -1,7 +1,7 @@
 /**
  * POST /api/chat
  * RAG-powered business advisor using Hormozi's published frameworks.
- * Pipeline: embed query (Gemini) → cosine similarity search (KV vectors) → synthesize (Claude) → respond with metrics
+ * Pipeline: embed query (Gemini) → cosine similarity search (static vectors) → stream synthesis (Claude) → respond with metrics + sources
  */
 
 const SYSTEM_PROMPT = `You are a business advisor grounded in Alex Hormozi's published frameworks from "$100M Offers" and "$100M Leads."
@@ -48,23 +48,19 @@ function cosineSimilarity(a, b) {
 async function vectorSearch(queryVector, env, limit = 5) {
   const start = Date.now();
 
-  // Load vector index from static assets (cached at edge by CF)
   const indexRes = await env.ASSETS.fetch(new Request('https://dummy/data/vector-index.json'));
   if (!indexRes.ok) throw new Error('Vector index not found');
   const index = await indexRes.json();
 
-  // Load chunk texts
   const textsRes = await env.ASSETS.fetch(new Request('https://dummy/data/chunk-texts.json'));
   if (!textsRes.ok) throw new Error('Chunk texts not found');
   const texts = await textsRes.json();
 
-  // Compute cosine similarity for each chunk
   const scored = index.map(entry => ({
     id: entry.id,
     score: cosineSimilarity(queryVector, entry.vector)
   }));
 
-  // Sort by score descending, take top N
   scored.sort((a, b) => b.score - a.score);
   const topN = scored.slice(0, limit);
 
@@ -81,40 +77,10 @@ async function vectorSearch(queryVector, env, limit = 5) {
   };
 }
 
-async function generateResponse(messages, context, anthropicKey) {
-  const start = Date.now();
-  const systemPrompt = SYSTEM_PROMPT.replace('{context}', context);
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': anthropicKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: messages.slice(-10)
-    })
-  });
-
-  const data = await res.json();
-  const reply = data.content?.[0]?.text || 'Sorry, I could not generate a response.';
-  const usage = data.usage || {};
-
-  return {
-    reply,
-    inputTokens: usage.input_tokens || 0,
-    outputTokens: usage.output_tokens || 0,
-    latencyMs: Date.now() - start
-  };
-}
-
 export async function onRequestPost({ request, env }) {
   const headers = {
-    'Content-Type': 'application/json',
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
@@ -123,66 +89,156 @@ export async function onRequestPost({ request, env }) {
   try {
     const { messages } = await request.json();
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return new Response(JSON.stringify({ error: 'messages array required' }), { status: 400, headers });
+      return new Response(JSON.stringify({ error: 'messages array required' }), {
+        status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
     }
 
     const userQuery = messages[messages.length - 1]?.content || '';
     if (!userQuery.trim()) {
-      return new Response(JSON.stringify({ error: 'empty query' }), { status: 400, headers });
+      return new Response(JSON.stringify({ error: 'empty query' }), {
+        status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
     }
 
     if (!env.GEMINI_API_KEY || !env.ANTHROPIC_API_KEY) {
-      return new Response(JSON.stringify({ error: 'Missing API keys' }), { status: 500, headers });
+      return new Response(JSON.stringify({ error: 'Missing API keys' }), {
+        status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
     }
 
     const pipelineStart = Date.now();
 
-    // Step 1: Embed the query
+    // Step 1: Embed
     const embedding = await embedQuery(userQuery, env.GEMINI_API_KEY);
 
-    // Step 2: Vector search (cosine similarity over KV-stored embeddings)
+    // Step 2: Vector search
     const search = await vectorSearch(embedding.vector, env);
-
-    // Filter to relevant content (score > 0.65)
     const relevant = search.results.filter(r => r.score > 0.65);
     const context = relevant.map((r, i) =>
       `[Chunk ${i + 1} | similarity: ${r.score}]\n${r.text}`
     ).join('\n\n---\n\n');
 
-    // Step 3: Generate response
-    const generation = await generateResponse(messages, context || 'No relevant context found.', env.ANTHROPIC_API_KEY);
+    // Step 3: Stream Claude response
+    const systemPrompt = SYSTEM_PROMPT.replace('{context}', context || 'No relevant context found.');
+    const genStart = Date.now();
 
-    // Cost estimation (Sonnet pricing)
-    const inputCost = (generation.inputTokens / 1000000) * 3;
-    const outputCost = (generation.outputTokens / 1000000) * 15;
-    const totalCost = Math.round((inputCost + outputCost) * 10000) / 10000;
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        stream: true,
+        system: systemPrompt,
+        messages: messages.slice(-10)
+      })
+    });
 
-    return new Response(JSON.stringify({
-      reply: generation.reply,
-      metrics: {
-        totalLatencyMs: Date.now() - pipelineStart,
-        embedding: { latencyMs: embedding.latencyMs },
-        retrieval: {
-          latencyMs: search.latencyMs,
-          chunksSearched: search.totalChunks,
-          chunksUsed: relevant.length,
-          scores: relevant.map(r => r.score)
-        },
-        generation: {
-          latencyMs: generation.latencyMs,
-          inputTokens: generation.inputTokens,
-          outputTokens: generation.outputTokens,
-          model: 'claude-sonnet-4-6',
-          estimatedCost: `$${totalCost}`
+    // Create a TransformStream to process SSE from Claude and forward to client
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
+
+    // Send retrieval metrics immediately as first event
+    const retrievalMetrics = {
+      type: 'metrics',
+      embedding: { latencyMs: embedding.latencyMs },
+      retrieval: {
+        latencyMs: search.latencyMs,
+        chunksSearched: search.totalChunks,
+        chunksUsed: relevant.length,
+        scores: relevant.map(r => r.score)
+      },
+      sources: relevant.map(r => ({
+        text: r.text.substring(0, 150) + (r.text.length > 150 ? '...' : ''),
+        score: r.score
+      }))
+    };
+
+    // Process Claude's SSE stream in background
+    const processStream = async () => {
+      try {
+        await writer.write(encoder.encode(`data: ${JSON.stringify(retrievalMetrics)}\n\n`));
+
+        const reader = claudeRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let inputTokens = 0;
+        let outputTokens = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') continue;
+
+            try {
+              const event = JSON.parse(data);
+
+              if (event.type === 'content_block_delta' && event.delta?.text) {
+                await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'text', text: event.delta.text })}\n\n`));
+              }
+
+              if (event.type === 'message_delta' && event.usage) {
+                outputTokens = event.usage.output_tokens || 0;
+              }
+
+              if (event.type === 'message_start' && event.message?.usage) {
+                inputTokens = event.message.usage.input_tokens || 0;
+              }
+            } catch (e) {
+              // Skip unparseable lines
+            }
+          }
         }
+
+        // Send final metrics
+        const genLatency = Date.now() - genStart;
+        const inputCost = (inputTokens / 1000000) * 3;
+        const outputCost = (outputTokens / 1000000) * 15;
+        const totalCost = Math.round((inputCost + outputCost) * 10000) / 10000;
+
+        const finalMetrics = {
+          type: 'done',
+          totalLatencyMs: Date.now() - pipelineStart,
+          generation: {
+            latencyMs: genLatency,
+            inputTokens,
+            outputTokens,
+            model: 'claude-sonnet-4-6',
+            estimatedCost: `$${totalCost}`
+          }
+        };
+        await writer.write(encoder.encode(`data: ${JSON.stringify(finalMetrics)}\n\n`));
+        await writer.close();
+      } catch (err) {
+        await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`));
+        await writer.close();
       }
-    }), { status: 200, headers });
+    };
+
+    // Don't await — let it stream
+    processStream();
+
+    return new Response(readable, { status: 200, headers });
 
   } catch (err) {
     return new Response(JSON.stringify({
       error: 'Internal error',
       detail: err.message
-    }), { status: 500, headers });
+    }), { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
   }
 }
 

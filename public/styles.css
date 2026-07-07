@@ -227,6 +227,48 @@ body {
   30% { transform: translateY(-6px); }
 }
 
+/* Sources */
+.sources { margin-top: 12px; }
+.sources summary {
+  font-size: 12px;
+  color: var(--text2);
+  cursor: pointer;
+  padding: 4px 0;
+}
+.sources summary:hover { color: var(--blue); }
+.sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--bg);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.source-item {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.source-score {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+.source-text {
+  color: var(--text2);
+}
+
+/* Dashboard divider */
+.dashboard-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
 /* Metrics Panel */
 .metrics-panel {
   background: var(--bg2);

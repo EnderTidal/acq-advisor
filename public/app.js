@@ -1,6 +1,6 @@
 /**
  * ACQ Advisor — Frontend logic
- * Chat interface + metrics display
+ * Streaming chat + metrics + source display
  */
 
 const chatMessages = document.getElementById('chatMessages');
@@ -9,33 +9,8 @@ const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 
 let conversationHistory = [];
-
-function addMessage(role, content) {
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  // Simple markdown: **bold**, *italic*, \n→<br>
-  let html = escapeHtml(content)
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/\n/g, '<br>');
-  div.innerHTML = `<div class="msg-content"><p>${html}</p></div>`;
-  chatMessages.appendChild(div);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-function addTypingIndicator() {
-  const div = document.createElement('div');
-  div.className = 'msg bot';
-  div.id = 'typingIndicator';
-  div.innerHTML = `<div class="msg-content"><div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
-  chatMessages.appendChild(div);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-function removeTypingIndicator() {
-  const el = document.getElementById('typingIndicator');
-  if (el) el.remove();
-}
+let totalQueries = 0;
+let totalCost = 0;
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -43,39 +18,85 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function updateMetrics(metrics) {
-  if (!metrics) return;
+function renderMarkdown(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+}
 
-  document.getElementById('metricStatus').textContent = 'Complete';
-  document.getElementById('metricStatus').style.color = 'var(--green)';
-  document.getElementById('metricLatency').textContent = `${metrics.totalLatencyMs}ms`;
+function addMessage(role, content) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = `<div class="msg-content"><p>${renderMarkdown(content)}</p></div>`;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return div;
+}
 
-  if (metrics.embedding) {
-    document.getElementById('metricEmbed').textContent = `${metrics.embedding.latencyMs}ms`;
+function addStreamingMessage() {
+  const div = document.createElement('div');
+  div.className = 'msg bot';
+  div.innerHTML = `<div class="msg-content"><p class="stream-text"></p><div class="sources-wrap"></div></div>`;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return div;
+}
+
+function updateMetrics(data) {
+  if (data.embedding) {
+    document.getElementById('metricEmbed').textContent = `${data.embedding.latencyMs}ms`;
   }
-
-  if (metrics.retrieval) {
-    document.getElementById('metricRetrieval').textContent = `${metrics.retrieval.latencyMs}ms`;
+  if (data.retrieval) {
+    document.getElementById('metricRetrieval').textContent = `${data.retrieval.latencyMs}ms`;
     document.getElementById('metricChunks').textContent =
-      `${metrics.retrieval.chunksUsed}/${metrics.retrieval.chunksSearched}`;
+      `${data.retrieval.chunksUsed}/${data.retrieval.chunksSearched}`;
     document.getElementById('metricScores').textContent =
-      metrics.retrieval.scores.map(s => s.toFixed(3)).join(', ') || '—';
+      data.retrieval.scores.map(s => s.toFixed(3)).join(', ') || '—';
   }
-
-  if (metrics.generation) {
-    document.getElementById('metricGen').textContent = `${metrics.generation.latencyMs}ms`;
+  if (data.generation) {
+    document.getElementById('metricGen').textContent = `${data.generation.latencyMs}ms`;
     document.getElementById('metricTokens').textContent =
-      `${metrics.generation.inputTokens} / ${metrics.generation.outputTokens}`;
-    document.getElementById('metricModel').textContent = metrics.generation.model;
-    document.getElementById('metricCost').textContent = metrics.generation.estimatedCost;
+      `${data.generation.inputTokens} / ${data.generation.outputTokens}`;
+    document.getElementById('metricModel').textContent = data.generation.model;
+    document.getElementById('metricCost').textContent = data.generation.estimatedCost;
+
+    // Update cumulative dashboard
+    const cost = parseFloat(data.generation.estimatedCost.replace('$', '')) || 0;
+    totalCost += cost;
+    totalQueries++;
+    document.getElementById('dashQueries').textContent = totalQueries;
+    document.getElementById('dashCost').textContent = `$${totalCost.toFixed(4)}`;
+    document.getElementById('dashAvg').textContent = `$${(totalCost / totalQueries).toFixed(4)}`;
   }
+  if (data.totalLatencyMs) {
+    document.getElementById('metricLatency').textContent = `${data.totalLatencyMs}ms`;
+    document.getElementById('metricStatus').textContent = 'Complete';
+    document.getElementById('metricStatus').style.color = 'var(--green)';
+  }
+}
+
+function showSources(sourcesWrap, sources) {
+  if (!sources || sources.length === 0) return;
+  const details = document.createElement('details');
+  details.className = 'sources';
+  details.innerHTML = `<summary>Sources (${sources.length} chunks)</summary>
+    <div class="sources-list">
+      ${sources.map((s, i) => `
+        <div class="source-item">
+          <span class="source-score">${s.score.toFixed(3)}</span>
+          <span class="source-text">${escapeHtml(s.text)}</span>
+        </div>
+      `).join('')}
+    </div>`;
+  sourcesWrap.appendChild(details);
 }
 
 function setLoading(loading) {
   sendBtn.disabled = loading;
   userInput.disabled = loading;
   if (loading) {
-    document.getElementById('metricStatus').textContent = 'Processing...';
+    document.getElementById('metricStatus').textContent = 'Streaming...';
     document.getElementById('metricStatus').style.color = 'var(--orange)';
   }
 }
@@ -85,17 +106,20 @@ async function sendMessage(e) {
   const text = userInput.value.trim();
   if (!text) return;
 
-  // Remove suggestion buttons after first message
   const suggestions = document.querySelector('.suggestions');
   if (suggestions) suggestions.remove();
 
   addMessage('user', text);
   userInput.value = '';
-
   conversationHistory.push({ role: 'user', content: text });
 
   setLoading(true);
-  addTypingIndicator();
+  const msgDiv = addStreamingMessage();
+  const streamText = msgDiv.querySelector('.stream-text');
+  const sourcesWrap = msgDiv.querySelector('.sources-wrap');
+
+  let fullText = '';
+  let sources = [];
 
   try {
     const res = await fetch('/api/chat', {
@@ -104,19 +128,52 @@ async function sendMessage(e) {
       body: JSON.stringify({ messages: conversationHistory })
     });
 
-    const data = await res.json();
-    removeTypingIndicator();
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-    if (data.error) {
-      addMessage('bot', `Error: ${data.error}`);
-    } else {
-      addMessage('bot', data.reply);
-      conversationHistory.push({ role: 'assistant', content: data.reply });
-      updateMetrics(data.metrics);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+
+          if (data.type === 'metrics') {
+            updateMetrics(data);
+            sources = data.sources || [];
+          }
+
+          if (data.type === 'text') {
+            fullText += data.text;
+            streamText.innerHTML = renderMarkdown(fullText);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+
+          if (data.type === 'done') {
+            updateMetrics(data);
+          }
+
+          if (data.type === 'error') {
+            streamText.textContent = `Error: ${data.error}`;
+          }
+        } catch (e) {
+          // Skip unparseable
+        }
+      }
     }
+
+    conversationHistory.push({ role: 'assistant', content: fullText });
+    showSources(sourcesWrap, sources);
+
   } catch (err) {
-    removeTypingIndicator();
-    addMessage('bot', 'Connection error. Please try again.');
+    streamText.textContent = 'Connection error. Please try again.';
   }
 
   setLoading(false);
@@ -128,7 +185,6 @@ function askSuggestion(btn) {
   chatForm.dispatchEvent(new Event('submit'));
 }
 
-// Enter to send
 userInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
