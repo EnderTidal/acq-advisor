@@ -74,12 +74,14 @@ function updateMetrics(data) {
     document.getElementById('metricStatus').textContent = 'Complete';
     document.getElementById('metricStatus').style.color = 'var(--green)';
   }
-  if (data.budget) {
-    document.getElementById('budgetSpent').textContent = data.budget.dailySpend;
-    document.getElementById('budgetCap').textContent = data.budget.dailyCap;
-    document.getElementById('budgetRemaining').textContent = data.budget.remaining;
-    const spent = parseFloat(data.budget.dailySpend.replace('$', ''));
-    const cap = parseFloat(data.budget.dailyCap.replace('$', ''));
+  // Update budget from session cost data (simple math: $5 cap - total spent)
+  if (data.generation) {
+    const cap = 5.00;
+    const spent = totalCost;
+    const remaining = Math.max(0, cap - spent);
+    document.getElementById('budgetSpent').textContent = `$${spent.toFixed(4)}`;
+    document.getElementById('budgetCap').textContent = `$${cap.toFixed(2)}`;
+    document.getElementById('budgetRemaining').textContent = `$${remaining.toFixed(4)}`;
     const pct = Math.min(100, (spent / cap) * 100);
     const bar = document.getElementById('budgetBarFill');
     bar.style.width = `${pct}%`;
