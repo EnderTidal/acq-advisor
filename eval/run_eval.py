@@ -76,7 +76,10 @@ def call_api(question: str) -> dict:
     req = urllib.request.Request(
         f"{API_URL}/api/chat",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "ACQ-Advisor-Eval/1.0"
+        },
         method="POST"
     )
 
@@ -126,7 +129,7 @@ def run_eval():
         results.append(score)
 
         status = "PASS" if score["concept_recall"] >= 0.5 else "FAIL"
-        icon = "✓" if status == "PASS" else "✗"
+        icon = "PASS" if status == "PASS" else "FAIL"
 
         print(f"  {icon} Recall: {score['concept_recall']:.0%} | "
               f"Chunks: {score['chunks_used']} | "
