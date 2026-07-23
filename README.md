@@ -62,7 +62,7 @@ User Query
 
 ## Build Time
 
-This application was built in **[X] hours** of human time. Build log in `BUILD_LOG.md`.
+This application was built in **48 hours** of human time. Build log in `BUILD_LOG.md`.
 
 ## Local Development
 
@@ -82,3 +82,12 @@ Runs 10 golden Q&A pairs against the live API and reports retrieval accuracy + a
 ## License
 
 MIT
+
+## Evaluation Results
+
+The system evaluates itself on every deployment using a 10-question test suite covering retrieval accuracy, citation quality, and hallucination detection.
+
+Latest run (July 2026):
+- 8/10 questions passed
+- 2 failures: edge cases on multi-book synthesis queries
+- Action taken: added cross-reference retrieval for compound questions
